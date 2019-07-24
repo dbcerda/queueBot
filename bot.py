@@ -13,8 +13,8 @@ bot = commands.Bot(command_prefix=BOT_PREFIX)
 # TODO guardar IP dos jogadores e passar no call_next_match()
 # TODO limite de rodadas por evento
 # TODO caixa de bombom
-# TODO funcao para reverter o ultimo vencedor caso haja algum troll/equivoco
-# TODO lista negra de usuarios que trollam
+# TODO blacklist
+# TODO vidas pra cada jogador
 
 BOMBONS = ["Prestigio", "Alpino", "Suflair", "Classic", "Galak", "Lollo", "Charge", "Sensação", "Chokito", "Negresco", "Smash"]
 
@@ -23,6 +23,10 @@ class QManager:
     def __init__(self):
         self.queue = []
         self.last_winner = None
+        self.maxWins = 0
+        self.playerLives = 0
+        self.maxRounds = 0
+
 
         # statistics
         self.victimList = {}
@@ -64,17 +68,23 @@ class QManager:
             await self.call_next_match(context)
             await context.send(f"{member.name} foi pro fim da fila")
 
-    def force_skip(self, context, target):
-        self.queue.remove(target)
-        self.queue.append(target)
-        # TODO se admin precisar pular um usuario
-        return
+    async def force_skip(self, context):
+        member = context.message.mentions.pop(0)
+        if member not in self.queue or not self.active_queue():
+            await context.send(f'Nao')
+        elif member in self.first_players():
+            self.queue.remove(member)
+            self.queue.append(member)
+            await self.call_next_match(context)
+            await context.send(f"{member.name} foi pro fim da fila")
 
-    def force_remove(self, context, target):
-        self.queue.remove(target)
-        self.queue.append(target)
-        # TODO se admin precisar remover um usuario
-        return
+    async def force_remove(self, context):
+        member = context.message.mentions[0]
+        if member in self.queue:
+            self.queue.remove(member)
+            await context.send(f'{member.name} foi removido da fila')
+        else:
+            await context.send(f'Usuario nao consta na fila')
 
     async def resolve_match(self, context):
         winner = context.author
@@ -95,8 +105,11 @@ class QManager:
     def first_players(self):
         return self.queue[0:2]
 
-    def show_queue(self):
-        return [member.name for member in self.queue]
+    async def show_queue(self, context):
+        if self.active_queue():
+            context.send(f' [{self.queue[0].name} x {self.queue[1].name}] - [{", ".join([member.name for member in self.queue[2:]])}]')
+        else:
+            context.send(f' [{", ".join([member.name for member in self.queue])}]')
 
     def number_of_players(self):
         return len(self.queue)
@@ -115,6 +128,12 @@ class QManager:
             return "FT2"
         else:
             return "FT3"
+
+    def revert(self):
+        # TODO statistics last winner
+        member = self.queue.pop()
+        self.queue.insert(1, member)
+
 
 
 QUEUE = QManager()
@@ -154,33 +173,52 @@ async def close_queue(ctx):
 
 
 @bot.command(name="entrar")
-# @is_channel("eventos")
+@is_channel("eventos")
 async def join_queue(ctx):
     await QUEUE.add_player(ctx)
 
 
 @bot.command(name="sair")
-# @is_channel("eventos")
+@is_channel("eventos")
 async def leave_queue(ctx):
     await QUEUE.remove_player(ctx)
 
 
 @bot.command(name="pular")
-# @is_channel("eventos")
+@is_channel("eventos")
 async def skip_turn(ctx):
     await QUEUE.skip_turn(ctx)
 
 
 @bot.command(name="ggez")
-# @is_channel("eventos")
+@is_channel("eventos")
 async def ggez(ctx):
     await QUEUE.resolve_match(ctx)
 
 
 @bot.command(name="fila")
-# @is_channel("eventos")
+@is_channel("eventos")
 async def show_queue(ctx):
-    await ctx.send(QUEUE.show_queue())
+    await QUEUE.show_queue()
+
+
+@bot.command(name="remover")
+@commands.has_role("Moderador")
+async def remove_from_queue(ctx):
+    await QUEUE.force_remove(ctx)
+
+
+@bot.command(name="chuta")
+@commands.has_role("Moderador")
+async def force_skip(ctx):
+    await QUEUE.force_skip(ctx)
+
+
+@bot.command(name="reverter")
+@commands.has_role("Moderador")
+async def revert(ctx):
+    QUEUE.revert()
+    await QUEUE.call_next_match(ctx)
 
 
 @bot.command(name="comandos")

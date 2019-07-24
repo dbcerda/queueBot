@@ -1,6 +1,7 @@
 import os
 import discord
 import random
+import re
 from discord.ext import commands
 
 BOT_PREFIX = os.environ['prefix']
@@ -10,7 +11,6 @@ bot = commands.Bot(command_prefix=BOT_PREFIX)
 # TODO winstreak - integracao com twitch?
 # TODO estatisticas (longest winstreak, maior numero de vitorias, lista de quem cada jogador venceu)
 # TODO avisar quando jogador fez volta inteira na fila
-# TODO guardar IP dos jogadores e passar no call_next_match()
 # TODO limite de rodadas por evento
 # TODO caixa de bombom
 # TODO blacklist
@@ -26,6 +26,7 @@ class QManager:
         self.maxWins = 0
         self.playerLives = 0
         self.maxRounds = 0
+        self.playerIpList = {}
 
 
         # statistics
@@ -107,9 +108,9 @@ class QManager:
 
     async def show_queue(self, context):
         if self.active_queue():
-            context.send(f' [{self.queue[0].name} x {self.queue[1].name}] - [{", ".join([member.name for member in self.queue[2:]])}]')
+            await context.send(f' [{self.queue[0].name} x {self.queue[1].name}] - [{", ".join([member.name for member in self.queue[2:]])}]')
         else:
-            context.send(f' [{", ".join([member.name for member in self.queue])}]')
+            await context.send(f' [{", ".join([member.name for member in self.queue])}]')
 
     def number_of_players(self):
         return len(self.queue)
@@ -121,7 +122,9 @@ class QManager:
         pass  # TODO resetar dados
 
     async def call_next_match(self, context):
-        await context.send(f'Proxima partida: {self.queue[0].mention} vs {self.queue[1].mention} - {self.rule_set()}')
+        await context.send(f'Proxima partida: {self.queue[0].mention} [{self.get_player_ip(self.queue[0])}] vs '
+                           f'{self.queue[1].mention} [{self.get_player_ip(self.queue[1])}] '
+                           f'- {self.rule_set()}')
 
     def rule_set(self):
         if len(self.queue) > 4:
@@ -134,6 +137,15 @@ class QManager:
         member = self.queue.pop()
         self.queue.insert(1, member)
 
+    def add_player_ip(self, member, ip):
+        self.playerIpList[member] = ip
+
+    def get_player_ip(self, member):
+        ip = self.playerIpList.get(member)
+        if ip is not None:
+            return ip
+        else:
+            return ""
 
 
 QUEUE = QManager()
@@ -158,7 +170,15 @@ async def on_ready():
     await bot.change_presence(status=discord.Status.idle, activity=discord.Game(name="!comandos"))
 
 
+@bot.event
+async def on_message(message):
+    test = re.match("\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\:\d{1,5}", message.content)
+    if test is not None:
+        QUEUE.add_player_ip(message.author, test.group())
+    await bot.process_commands(message)
+
 # -- BOT COMMANDS --
+
 
 @bot.command(name="ativar")
 @commands.has_role("Moderador")
@@ -173,33 +193,33 @@ async def close_queue(ctx):
 
 
 @bot.command(name="entrar")
-@is_channel("eventos")
+# @is_channel("eventos")
 async def join_queue(ctx):
     await QUEUE.add_player(ctx)
 
 
 @bot.command(name="sair")
-@is_channel("eventos")
+#@is_channel("eventos")
 async def leave_queue(ctx):
     await QUEUE.remove_player(ctx)
 
 
 @bot.command(name="pular")
-@is_channel("eventos")
+#@is_channel("eventos")
 async def skip_turn(ctx):
     await QUEUE.skip_turn(ctx)
 
 
 @bot.command(name="ggez")
-@is_channel("eventos")
+#@is_channel("eventos")
 async def ggez(ctx):
     await QUEUE.resolve_match(ctx)
 
 
 @bot.command(name="fila")
-@is_channel("eventos")
+#@is_channel("eventos")
 async def show_queue(ctx):
-    await QUEUE.show_queue()
+    await QUEUE.show_queue(ctx)
 
 
 @bot.command(name="remover")
@@ -208,7 +228,7 @@ async def remove_from_queue(ctx):
     await QUEUE.force_remove(ctx)
 
 
-@bot.command(name="chuta")
+@bot.command(name="chutar")
 @commands.has_role("Moderador")
 async def force_skip(ctx):
     await QUEUE.force_skip(ctx)
